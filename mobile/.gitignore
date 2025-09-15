@@ -1,0 +1,32 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub-cache/
+
+# Builds
+build/
+android/.gradle/
+android/app/build/
+ios/Pods/
+ios/DerivedData/
+
+# Environment files
+.env
+.env.*
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated
+pubspec.lock
+# Optionally ignore generated l10n
+# lib/l10n/
