@@ -48,6 +48,9 @@ export class Tourist {
   @Column({ unique: true })
   phoneNumber: string;
 
+  @Column()
+  password: string;
+
   @Column({ nullable: true })
   aadhaarNumber: string;
 

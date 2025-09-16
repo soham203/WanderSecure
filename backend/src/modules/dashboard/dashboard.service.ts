@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { Repository, Between, Not } from 'typeorm';
 import { Tourist, TouristStatus } from '../../entities/tourist.entity';
 import { SafetyAlert, AlertType, AlertStatus } from '../../entities/safety-alert.entity';
 import { LocationHistory } from '../../entities/location-history.entity';
@@ -21,140 +21,115 @@ export class DashboardService {
     private redisService: RedisService,
   ) {}
 
-  async getDashboardOverview() {
+  async getDashboardStats() {
     const [
       totalTourists,
       activeTourists,
-      missingTourists,
       totalAlerts,
       pendingAlerts,
       resolvedAlerts,
-      totalGeoFences,
-      activeGeoFences,
+      criticalAlerts,
     ] = await Promise.all([
       this.touristRepository.count(),
       this.touristRepository.count({ where: { status: TouristStatus.ACTIVE } }),
-      this.touristRepository.count({ where: { status: TouristStatus.MISSING } }),
       this.safetyAlertRepository.count(),
       this.safetyAlertRepository.count({ where: { status: AlertStatus.PENDING } }),
       this.safetyAlertRepository.count({ where: { status: AlertStatus.RESOLVED } }),
-      this.geoFenceRepository.count(),
-      this.geoFenceRepository.count({ where: { isActive: true } }),
+      this.safetyAlertRepository.count({ where: { priority: 'critical' } }),
     ]);
 
     return {
-      tourists: {
-        total: totalTourists,
-        active: activeTourists,
-        missing: missingTourists,
-      },
-      alerts: {
-        total: totalAlerts,
-        pending: pendingAlerts,
-        resolved: resolvedAlerts,
-        resolutionRate: totalAlerts > 0 ? (resolvedAlerts / totalAlerts) * 100 : 0,
-      },
-      geoFences: {
-        total: totalGeoFences,
-        active: activeGeoFences,
-      },
+      totalTourists,
+      activeTourists,
+      totalAlerts,
+      pendingAlerts,
+      resolvedAlerts,
+      criticalAlerts,
     };
   }
 
-  async getTouristLocations() {
-    // Get real-time locations from Redis
-    const locations = await this.redisService.hGetAll('tourist_locations');
-    
-    return Object.values(locations).map(location => {
-      const parsed = JSON.parse(location as string);
-      return {
-        touristId: parsed.tourist.id,
-        name: `${parsed.tourist.firstName} ${parsed.tourist.lastName}`,
-        latitude: parsed.latitude,
-        longitude: parsed.longitude,
-        timestamp: parsed.timestamp,
-        safetyScore: parsed.tourist.safetyScore,
-        status: parsed.tourist.status,
-      };
-    });
-  }
-
-  async getAlertHeatmap(timeRange: string = '24h') {
-    const hours = timeRange === '24h' ? 24 : timeRange === '7d' ? 168 : 1;
-    const startDate = new Date(Date.now() - hours * 60 * 60 * 1000);
-
-    const alerts = await this.safetyAlertRepository.find({
-      where: {
-        createdAt: Between(startDate, new Date()),
-        latitude: Not(null),
-        longitude: Not(null),
-      },
-    });
-
-    // Group alerts by location for heatmap
-    const heatmapData = alerts.reduce((acc, alert) => {
-      if (alert.latitude && alert.longitude) {
-        const key = `${alert.latitude.toFixed(4)},${alert.longitude.toFixed(4)}`;
-        if (!acc[key]) {
-          acc[key] = {
-            latitude: alert.latitude,
-            longitude: alert.longitude,
-            count: 0,
-            severity: 0,
-            alertTypes: [],
-          };
-        }
-        acc[key].count++;
-        acc[key].severity += this.getSeverityScore(alert.priority);
-        acc[key].alertTypes.push(alert.alertType);
-      }
-      return acc;
-    }, {});
-
-    return Object.values(heatmapData);
-  }
-
   async getRecentAlerts(limit: number = 10) {
-    const alerts = await this.safetyAlertRepository.find({
+    return this.safetyAlertRepository.find({
       relations: ['tourist'],
       order: { createdAt: 'DESC' },
       take: limit,
     });
-
-    return alerts.map(alert => ({
-      id: alert.id,
-      type: alert.alertType,
-      priority: alert.priority,
-      status: alert.status,
-      message: alert.message,
-      tourist: {
-        id: alert.tourist.id,
-        name: `${alert.tourist.firstName} ${alert.tourist.lastName}`,
-        digitalId: alert.tourist.digitalId,
-      },
-      location: {
-        latitude: alert.latitude,
-        longitude: alert.longitude,
-        address: alert.address,
-      },
-      createdAt: alert.createdAt,
-    }));
   }
 
-  async getTouristClusters(radius: number = 1000) {
-    const activeTourists = await this.touristRepository.find({
+  async getTouristDistribution() {
+    const tourists = await this.touristRepository.find({
       where: {
-        status: TouristStatus.ACTIVE,
-        isTrackingEnabled: true,
         lastKnownLatitude: Not(null),
         lastKnownLongitude: Not(null),
       },
+      select: ['id', 'lastKnownLatitude', 'lastKnownLongitude', 'safetyScore'],
     });
 
+    return tourists.map(tourist => ({
+      id: tourist.id,
+      latitude: tourist.lastKnownLatitude,
+      longitude: tourist.lastKnownLongitude,
+      safetyScore: tourist.safetyScore,
+    }));
+  }
+
+  async getSafetyScoreDistribution() {
+    const scores = await this.touristRepository
+      .createQueryBuilder('tourist')
+      .select('tourist.safetyScore', 'score')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('tourist.safetyScore')
+      .getRawMany();
+
+    return scores.map(score => ({
+      score: score.score,
+      count: parseInt(score.count),
+    }));
+  }
+
+  async getAlertTrends(days: number = 7) {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const alerts = await this.safetyAlertRepository
+      .createQueryBuilder('alert')
+      .select('DATE(alert.createdAt)', 'date')
+      .addSelect('COUNT(*)', 'count')
+      .where('alert.createdAt >= :startDate', { startDate })
+      .groupBy('DATE(alert.createdAt)')
+      .orderBy('date', 'ASC')
+      .getRawMany();
+
+    return alerts.map(alert => ({
+      date: alert.date,
+      count: parseInt(alert.count),
+    }));
+  }
+
+  async getHighRiskZones() {
+    const tourists = await this.touristRepository.find({
+      where: {
+        lastKnownLatitude: Not(null),
+        lastKnownLongitude: Not(null),
+      },
+      select: ['id', 'lastKnownLatitude', 'lastKnownLongitude', 'safetyScore'],
+    });
+
+    // Group tourists by location clusters
+    const clusters = this.clusterTourists(tourists);
+    
+    return clusters.map(cluster => ({
+      center: cluster.center,
+      count: cluster.tourists.length,
+      averageRisk: cluster.averageRisk,
+    }));
+  }
+
+  private clusterTourists(tourists: any[], radius: number = 0.01) {
     const clusters = [];
     const processed = new Set();
 
-    for (const tourist of activeTourists) {
+    for (const tourist of tourists) {
       if (processed.has(tourist.id)) continue;
 
       const cluster = {
@@ -163,177 +138,72 @@ export class DashboardService {
           longitude: tourist.lastKnownLongitude,
         },
         tourists: [tourist],
-        count: 1,
+        averageRisk: this.getRiskScore(tourist.safetyScore),
       };
 
       // Find nearby tourists
-      for (const otherTourist of activeTourists) {
-        if (otherTourist.id === tourist.id || processed.has(otherTourist.id)) continue;
+      for (const other of tourists) {
+        if (processed.has(other.id) || other.id === tourist.id) continue;
 
         const distance = this.calculateDistance(
           tourist.lastKnownLatitude,
           tourist.lastKnownLongitude,
-          otherTourist.lastKnownLatitude,
-          otherTourist.lastKnownLongitude,
+          other.lastKnownLatitude,
+          other.lastKnownLongitude,
         );
 
         if (distance <= radius) {
-          cluster.tourists.push(otherTourist);
-          cluster.count++;
-          processed.add(otherTourist.id);
+          cluster.tourists.push(other);
+          processed.add(other.id);
         }
       }
 
-      if (cluster.count > 1) {
-        clusters.push(cluster);
-        processed.add(tourist.id);
-      }
+      processed.add(tourist.id);
+      clusters.push(cluster);
     }
 
     return clusters;
   }
 
-  async getStatistics(timeRange: string = '24h') {
-    const hours = timeRange === '24h' ? 24 : timeRange === '7d' ? 168 : timeRange === '30d' ? 720 : 1;
-    const startDate = new Date(Date.now() - hours * 60 * 60 * 1000);
-
-    const [
-      alertsByType,
-      alertsByPriority,
-      alertsByStatus,
-      locationUpdates,
-      panicAlerts,
-      geoFenceViolations,
-    ] = await Promise.all([
-      this.getAlertsByType(startDate),
-      this.getAlertsByPriority(startDate),
-      this.getAlertsByStatus(startDate),
-      this.locationHistoryRepository.count({
-        where: { timestamp: Between(startDate, new Date()) },
-      }),
-      this.safetyAlertRepository.count({
-        where: {
-          alertType: AlertType.PANIC_BUTTON,
-          createdAt: Between(startDate, new Date()),
-        },
-      }),
-      this.safetyAlertRepository.count({
-        where: {
-          alertType: AlertType.GEO_FENCE_VIOLATION,
-          createdAt: Between(startDate, new Date()),
-        },
-      }),
-    ]);
-
-    return {
-      timeRange,
-      alertsByType,
-      alertsByPriority,
-      alertsByStatus,
-      locationUpdates,
-      panicAlerts,
-      geoFenceViolations,
-    };
-  }
-
-  async getGeoFenceStatus() {
-    const geoFences = await this.geoFenceRepository.find({
-      where: { isActive: true },
-    });
-
-    const geoFenceStatus = await Promise.all(
-      geoFences.map(async (fence) => {
-        const violations = await this.safetyAlertRepository.count({
-          where: {
-            alertType: AlertType.GEO_FENCE_VIOLATION,
-            metadata: { geoFenceId: fence.id },
-            createdAt: Between(
-              new Date(Date.now() - 24 * 60 * 60 * 1000),
-              new Date(),
-            ),
-          },
-        });
-
-        return {
-          id: fence.id,
-          name: fence.name,
-          type: fence.type,
-          violations24h: violations,
-          status: violations > 5 ? 'high_risk' : violations > 0 ? 'medium_risk' : 'safe',
-        };
-      }),
-    );
-
-    return geoFenceStatus;
-  }
-
-  private async getAlertsByType(startDate: Date) {
-    const alerts = await this.safetyAlertRepository
-      .createQueryBuilder('alert')
-      .select('alert.alertType', 'type')
-      .addSelect('COUNT(*)', 'count')
-      .where('alert.createdAt >= :startDate', { startDate })
-      .groupBy('alert.alertType')
-      .getRawMany();
-
-    return alerts.reduce((acc, alert) => {
-      acc[alert.type] = parseInt(alert.count);
-      return acc;
-    }, {});
-  }
-
-  private async getAlertsByPriority(startDate: Date) {
-    const alerts = await this.safetyAlertRepository
-      .createQueryBuilder('alert')
-      .select('alert.priority', 'priority')
-      .addSelect('COUNT(*)', 'count')
-      .where('alert.createdAt >= :startDate', { startDate })
-      .groupBy('alert.priority')
-      .getRawMany();
-
-    return alerts.reduce((acc, alert) => {
-      acc[alert.priority] = parseInt(alert.count);
-      return acc;
-    }, {});
-  }
-
-  private async getAlertsByStatus(startDate: Date) {
-    const alerts = await this.safetyAlertRepository
-      .createQueryBuilder('alert')
-      .select('alert.status', 'status')
-      .addSelect('COUNT(*)', 'count')
-      .where('alert.createdAt >= :startDate', { startDate })
-      .groupBy('alert.status')
-      .getRawMany();
-
-    return alerts.reduce((acc, alert) => {
-      acc[alert.status] = parseInt(alert.count);
-      return acc;
-    }, {});
-  }
-
   private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371e3; // Earth's radius in meters
-    const φ1 = (lat1 * Math.PI) / 180;
-    const φ2 = (lat2 * Math.PI) / 180;
-    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
+    const R = 6371; // Earth's radius in kilometers
+    const dLat = this.toRadians(lat2 - lat1);
+    const dLon = this.toRadians(lon2 - lon1);
     const a =
-      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(this.toRadians(lat1)) * Math.cos(this.toRadians(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c; // Distance in meters
+    return R * c;
   }
 
-  private getSeverityScore(priority: string): number {
-    switch (priority) {
+  private toRadians(degrees: number): number {
+    return degrees * (Math.PI / 180);
+  }
+
+  private getRiskScore(safetyScore: string): number {
+    switch (safetyScore) {
       case 'low': return 1;
       case 'medium': return 2;
       case 'high': return 3;
       case 'critical': return 4;
-      default: return 1;
+      default: return 2;
     }
+  }
+
+  async getTouristClusters(radius: number = 0.01) {
+    const tourists = await this.touristRepository.find({
+      where: {
+        status: TouristStatus.ACTIVE,
+        isTrackingEnabled: true,
+        lastKnownLatitude: Not(null),
+        lastKnownLongitude: Not(null),
+      },
+    });
+
+    // Filter tourists within radius (simplified calculation)
+    const clusters = this.clusterTourists(tourists, radius);
+    
+    return clusters.filter(cluster => cluster.tourists.length > 1);
   }
 }

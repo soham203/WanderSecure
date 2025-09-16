@@ -1,17 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 
 @Injectable()
 export class AiService {
-  private aiServiceUrl: string;
+  private readonly logger = new Logger(AiService.name);
+  private readonly aiServiceUrl: string;
 
-  constructor(
-    private httpService: HttpService,
-    private configService: ConfigService,
-  ) {
-    this.aiServiceUrl = this.configService.get('AI_SERVICE_URL', 'http://localhost:8001');
+  constructor(private readonly httpService: HttpService) {
+    this.aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8001';
   }
 
   async analyzeLocationPattern(touristId: string, locations: any[]): Promise<any> {
@@ -22,9 +19,9 @@ export class AiService {
           locations,
         }),
       );
-      return response.data;
+      return (response as any).data;
     } catch (error) {
-      console.error('AI service error:', error);
+      this.logger.error('AI service error:', error);
       return { riskScore: 0.5, anomalies: [] };
     }
   }
@@ -37,9 +34,9 @@ export class AiService {
           data: recentData,
         }),
       );
-      return response.data;
+      return (response as any).data;
     } catch (error) {
-      console.error('AI service error:', error);
+      this.logger.error('AI service error:', error);
       return { anomalies: [], riskScore: 0.5 };
     }
   }
@@ -52,10 +49,10 @@ export class AiService {
           factors,
         }),
       );
-      return response.data.safetyScore;
+      return (response as any).data.safetyScore;
     } catch (error) {
-      console.error('AI service error:', error);
-      return 0.5; // Default medium risk
+      this.logger.error('AI service error:', error);
+      return 0.5;
     }
   }
 
@@ -64,29 +61,14 @@ export class AiService {
       const response = await firstValueFrom(
         this.httpService.post(`${this.aiServiceUrl}/predict-risk`, {
           touristId,
-          location: currentLocation,
+          currentLocation,
           timeOfDay,
         }),
       );
-      return response.data;
+      return (response as any).data;
     } catch (error) {
-      console.error('AI service error:', error);
+      this.logger.error('AI service error:', error);
       return { riskLevel: 'medium', confidence: 0.5 };
-    }
-  }
-
-  async analyzeBehavior(touristId: string, behaviorData: any): Promise<any> {
-    try {
-      const response = await firstValueFrom(
-        this.httpService.post(`${this.aiServiceUrl}/analyze-behavior`, {
-          touristId,
-          behavior: behaviorData,
-        }),
-      );
-      return response.data;
-    } catch (error) {
-      console.error('AI service error:', error);
-      return { isNormal: true, confidence: 0.5 };
     }
   }
 
@@ -95,13 +77,28 @@ export class AiService {
       const response = await firstValueFrom(
         this.httpService.post(`${this.aiServiceUrl}/generate-insights`, {
           touristId,
-          data: historicalData,
+          historicalData,
         }),
       );
-      return response.data;
+      return (response as any).data;
     } catch (error) {
-      console.error('AI service error:', error);
+      this.logger.error('AI service error:', error);
       return { insights: [], recommendations: [] };
+    }
+  }
+
+  async processEmergencySignal(touristId: string, signalData: any): Promise<any> {
+    try {
+      const response = await firstValueFrom(
+        this.httpService.post(`${this.aiServiceUrl}/process-emergency-signal`, {
+          touristId,
+          signalData,
+        }),
+      );
+      return (response as any).data;
+    } catch (error) {
+      this.logger.error('AI service error:', error);
+      return { priority: 'high', response: 'immediate' };
     }
   }
 
@@ -110,9 +107,9 @@ export class AiService {
       const response = await firstValueFrom(
         this.httpService.get(`${this.aiServiceUrl}/health`),
       );
-      return response.status === 200;
+      return (response as any).status === 200;
     } catch (error) {
-      console.error('AI service health check failed:', error);
+      this.logger.error('AI service health check failed:', error);
       return false;
     }
   }

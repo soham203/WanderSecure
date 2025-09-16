@@ -2,6 +2,29 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsString, MinLength, IsOptional, IsPhoneNumber, IsDateString, IsArray, ValidateNested, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
 
+export class TripItineraryDto {
+  @ApiProperty({ example: 'Goa' })
+  @IsString()
+  destination: string;
+
+  @ApiProperty({ example: '2024-01-01' })
+  @IsDateString()
+  startDate: string;
+
+  @ApiProperty({ example: '2024-01-07' })
+  @IsDateString()
+  endDate: string;
+
+  @ApiProperty({ example: 'Hotel Paradise' })
+  @IsString()
+  accommodation: string;
+
+  @ApiProperty({ example: ['Beach', 'Water Sports', 'Sightseeing'] })
+  @IsArray()
+  @IsString({ each: true })
+  activities: string[];
+}
+
 export class RegisterDto {
   @ApiProperty({ example: 'john@example.com' })
   @IsEmail()
@@ -42,13 +65,9 @@ export class RegisterDto {
   @IsString()
   passportNumber?: string;
 
-  @ApiProperty({
+  @ApiProperty({ 
     example: [
-      {
-        name: 'Jane Doe',
-        phone: '+919876543211',
-        relationship: 'Spouse'
-      }
+      { name: 'Jane Doe', phone: '+919876543211', relationship: 'Spouse' }
     ]
   })
   @IsArray()
@@ -56,7 +75,7 @@ export class RegisterDto {
   @Type(() => EmergencyContactDto)
   emergencyContacts: EmergencyContactDto[];
 
-  @ApiProperty({
+  @ApiProperty({ 
     example: {
       destination: 'Goa',
       startDate: '2024-01-01',
@@ -66,6 +85,8 @@ export class RegisterDto {
     }
   })
   @IsOptional()
+  @ValidateNested()
+  @Type(() => TripItineraryDto)
   tripItinerary?: TripItineraryDto;
 }
 
@@ -83,29 +104,6 @@ export class EmergencyContactDto {
   relationship: string;
 }
 
-export class TripItineraryDto {
-  @ApiProperty({ example: 'Goa' })
-  @IsString()
-  destination: string;
-
-  @ApiProperty({ example: '2024-01-01' })
-  @IsDateString()
-  startDate: string;
-
-  @ApiProperty({ example: '2024-01-07' })
-  @IsDateString()
-  endDate: string;
-
-  @ApiProperty({ example: 'Hotel Paradise' })
-  @IsString()
-  accommodation: string;
-
-  @ApiProperty({ example: ['Beach', 'Water Sports', 'Sightseeing'] })
-  @IsArray()
-  @IsString({ each: true })
-  activities: string[];
-}
-
 export class LoginDto {
   @ApiProperty({ example: 'john@example.com' })
   @IsEmail()
@@ -116,8 +114,50 @@ export class LoginDto {
   password: string;
 }
 
+export class AuthResponseDto {
+  @ApiProperty({ example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' })
+  access_token: string;
+
+  @ApiProperty({ example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' })
+  refresh_token: string;
+
+  @ApiProperty({ example: 3600 })
+  expires_in: number;
+
+  @ApiProperty({ example: 'Bearer' })
+  token_type: string;
+}
+
 export class RefreshTokenDto {
   @ApiProperty({ example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' })
   @IsString()
-  refreshToken: string;
+  refresh_token: string;
+}
+
+export class ChangePasswordDto {
+  @ApiProperty({ example: 'oldpassword123' })
+  @IsString()
+  currentPassword: string;
+
+  @ApiProperty({ example: 'newpassword123', minLength: 8 })
+  @IsString()
+  @MinLength(8)
+  newPassword: string;
+}
+
+export class ForgotPasswordDto {
+  @ApiProperty({ example: 'john@example.com' })
+  @IsEmail()
+  email: string;
+}
+
+export class ResetPasswordDto {
+  @ApiProperty({ example: 'reset_token_here' })
+  @IsString()
+  token: string;
+
+  @ApiProperty({ example: 'newpassword123', minLength: 8 })
+  @IsString()
+  @MinLength(8)
+  newPassword: string;
 }
