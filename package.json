@@ -1,0 +1,30 @@
+{
+  "name": "smart-tourist-safety-system",
+  "version": "1.0.0",
+  "description": "Smart Tourist Safety Monitoring & Incident Response System for SIH 2025",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:client\" \"npm run dev:ai\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "dev:ai": "cd ai-service && python main.py",
+    "install:all": "npm install && cd backend && npm install && cd ../client && npm install && cd ../ai-service && pip install -r requirements.txt",
+    "build": "npm run build:backend && npm run build:client",
+    "build:backend": "cd backend && npm run build",
+    "build:client": "cd client && npm run build",
+    "start": "npm run dev"
+  },
+  "keywords": [
+    "tourism",
+    "safety",
+    "blockchain",
+    "ai",
+    "geo-fencing",
+    "monitoring"
+  ],
+  "author": "SIH 2025 Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
